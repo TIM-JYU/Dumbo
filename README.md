@@ -140,14 +140,14 @@ type InputElement<T> = {
 Processes an object `{"a": "md:# Hello, world", "b": ["*foo*", "md:**bar**"]}` and converts all values prefixed with `md:` to HTML:
 
 ```bash
-curl --data '{"content":[{"a": "md:# Hello, world", "b": ["*foo*", "md:**bar**"]}]}' localhost:5000/mdkeys
+@ curl --data '{"content":[{"a": "md:# Hello, world", "b": ["*foo*", "md:**bar**"]}]}' localhost:5000/mdkeys
 [{"a":"<h1 id=\"hello-world\">Hello, world</h1>","b":["*foo*","<strong>bar</strong>"]}]
 ```
 
 Recursively specify the content with different input options:
 
 ```bash
-curl --data '{"content": [{"content": "md:$1+1$"}, {"content": "md:$1+1$", "mathOption": "svg"}]}' localhost:5000/mdk
+@ curl --data '{"content": [{"content": "md:$1+1$"}, {"content": "md:$1+1$", "mathOption": "svg"}]}' localhost:5000/mdk
 eys
 ["<span class=\"math inline\">\\(1+1\\)</span>","<span class=\"mathp inline\"><img style=\"width:2.77670em; vertical-align:-0.15963em\" src=\"data:image/svg+xml;...\" title=\"1+1\"></span>"]
 ```
@@ -170,13 +170,13 @@ eys
 Processes an object `{"a": "md:# Hello, world", "b": ["*foo*", "md:**bar**"]}` and converts all values prefixed with `md:` to HTML:
 
 ```bash
-curl --data '{"content":[{"a": "md:# Hello, world", "b": ["*foo*", "md:**bar**"]}]}' localhost:5000/latexkeys
+@ curl --data '{"content":[{"a": "md:# Hello, world", "b": ["*foo*", "md:**bar**"]}]}' localhost:5000/latexkeys
 [{"a":"\\hypertarget{hello-world}{%\n\\section{Hello, world}\\label{hello-world}}","b":["*foo*","\\textbf{bar}"]}]
 ```
 
 
 ## Credits and license
 
-Dumbo was created and primarily developed by Ville Tirronen (@aleator) with some minor tweaks added by Mika Lehtinen (@Smibu).
+Dumbo was created and primarily developed by Ville Tirronen ([@aleator](https://github.com/aleator)) with some minor tweaks added by Mika Lehtinen ([@Smibu](https://github.com/Smibu)).
 
 Dumbo is licensed under GPLv3.
