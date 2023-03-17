@@ -1,6 +1,6 @@
 ARG TIM_IMAGE_TAG
 
-FROM fpco/stack-build:lts-18 AS build
+FROM fpco/stack-build:lts-18.13 AS build
 LABEL author="Ville Tirronen"
 LABEL maintainer="help@tim.education"
 
