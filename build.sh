@@ -6,6 +6,7 @@
 #  --push: if specified, push the container to Docker Hub
 
 # parse args
+tag="latest"
 while [[ $# -gt 0 ]]
 do
     key="$1"
@@ -26,7 +27,6 @@ do
 done
 
 tag_base="ghcr.io/tim-jyu/dumbo"
-tag=${1:-latest}
 current_commit=$(git rev-parse HEAD)
 current_commit_date=$(git show -s --format=%cd --date=format:%Y-%m-%d HEAD)
 
