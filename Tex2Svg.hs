@@ -70,9 +70,9 @@ latexTemplate preamble mt eqn env = unlines
   , "\\usepackage{amsfonts}"
   , "\\usepackage{amssymb}"
   , "\\usepackage[paperwidth=7.7in]{geometry}"
-  , "\\usepackage[active,dvips,displaymath,textmath,tightpage]{preview}"
   , "\\renewcommand{\\arraystretch}{1.5}"
   , preamble
+  , "\\usepackage[active,dvips,displaymath,textmath,tightpage]{preview}" -- This must be last, otherwise some packages will not load
   , "\\begin{document}"
   , case mt of
     InlineMath  -> "$" ++ specialCmd ++ eqn ++ "$"
