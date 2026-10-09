@@ -4,7 +4,22 @@
 {-# LANGUAGE ScopedTypeVariables #-}
 {-#OPTIONS_GHC -Wall -fno-warn-name-shadowing -fwarn-incomplete-patterns#-}
 
-module Tex2Svg (tex2svg,Tex2SvgRuntime( .. ),mathEnvsSet,findDVISVGM,findLatex,mkLatex,mkDVISVGM,LatexPath,DVISVGMPath,ConversionError(..),SetupError(..),MathType(..)) where
+module Tex2Svg
+  ( tex2svg
+  , tex2csvg
+  , Tex2SvgRuntime( .. )
+  , mathEnvsSet
+  , findDVISVGM
+  , findLatex
+  , mkLatex
+  , mkDVISVGM
+  , LatexPath
+  , DVISVGMPath
+  , ConversionError(..)
+  , SetupError(..)
+  , MathType(..)
+  ) where
+
 import           Control.DeepSeq
 import           Control.Exception
 import           Control.Monad                   (unless, void)
@@ -38,14 +53,22 @@ import           Text.Blaze.Html5.Attributes     (class_, src, style,
                                                   title)
 import           Text.Pandoc.JSON
 
+
 specialCmd :: String
 specialCmd
   = "\\special{dvisvgm:rawdef <style type=\"text/css\"><![CDATA[path {stroke: currentColor;stroke-width: 0.05pt;}]]></style>}"
 
+
+svgAttrs :: String
+svgAttrs =
+  " fill=\"currentColor\" stroke=\"currentColor\" stroke-width=\"0.10pt\""
+
+
 type MathEnvResult = Either String MathEnv
 
-latexTemplate :: String -> MathType -> String -> MathEnvResult -> String
-latexTemplate preamble _ eqn (Right (MathEnv "tikzpicture")) = unlines
+
+latexTemplate :: String -> String -> MathType -> String -> MathEnvResult -> String
+latexTemplate special preamble _ eqn (Right (MathEnv "tikzpicture")) = unlines
   [
     -- workaround for l3kernel bug, see
     -- https://tex.stackexchange.com/questions/529129
@@ -64,7 +87,7 @@ latexTemplate preamble _ eqn (Right (MathEnv "tikzpicture")) = unlines
   , "\\end{document}"
   ]
 
-latexTemplate preamble mt eqn env = unlines
+latexTemplate special preamble mt eqn env = unlines
   [ "\\documentclass{article}"
   , "\\usepackage{amsmath}"
   , "\\usepackage{amsfonts}"
@@ -75,12 +98,13 @@ latexTemplate preamble mt eqn env = unlines
   , "\\usepackage[active,dvips,displaymath,textmath,tightpage]{preview}" -- This must be last, otherwise some packages will not load
   , "\\begin{document}"
   , case mt of
-    InlineMath  -> "$" ++ specialCmd ++ eqn ++ "$"
+    InlineMath  -> "$" ++ special ++ eqn ++ "$"
     DisplayMath -> case env of
-      Right _ -> "\\begin{preview}" ++ specialCmd ++ eqn ++ "\\end{preview}"
-      Left  _ -> "$$" ++ specialCmd ++ eqn ++ "$$"
+      Right _ -> "\\begin{preview}" ++ special ++ eqn ++ "\\end{preview}"
+      Left  _ -> "$$" ++ special ++ eqn ++ "$$"
   , "\\end{document}"
   ]
+
 
 mathEnvs :: [T.Text]
 mathEnvs =
@@ -95,11 +119,14 @@ mathEnvs =
   , "tikzpicture"
   ]
 
+
 mathEnvsWithStarred :: [T.Text]
 mathEnvsWithStarred = map (<> "*") mathEnvs <> mathEnvs
 
+
 mathEnvsSet :: S.Set String
 mathEnvsSet = S.fromList $ map T.unpack mathEnvsWithStarred
+
 
 parseMathEnv :: Parser MathEnv
 parseMathEnv = do
@@ -110,6 +137,7 @@ parseMathEnv = do
   _       <- option "" (string "*")
   _       <- string "}"
   return $ MathEnv envname
+
 
 parseBlock :: Parser EqnOut
 parseBlock = do
@@ -122,24 +150,29 @@ parseBlock = do
   o <- outputLine
   return $ EqnOut (LT.unpack (LT.fromStrict o)) m
 
+
 emptyPageNote :: Parser ()
 emptyPageNote =
   option () (skipSpace *> string "page is empty" *> skipLine)
     <?> "Empty page message"
+
 
 preLine :: Parser ()
 preLine = option
   ()
   ((string "pre-processing DVI file" *> skipLine) <?> "Pre-processing message")
 
+
 procMsg :: Parser Int
 procMsg =
   (string "processing page " *> decimal <* endOfLine)
     <?> "Processing page message"
 
+
 procPdf :: Parser ()
 procPdf =
   (string "processing PDF file" *> skipLine) <?> "Processing PDF message"
+
 
 outputLine :: Parser T.Text
 outputLine =
@@ -147,8 +180,10 @@ outputLine =
     )
     <?> "Output line"
 
+
 skipLine :: Parser ()
 skipLine = (skipWhile (not . isEndOfLine) *> endOfLine) <?> "Junkline"
+
 
 metricItem :: T.Text -> Parser Double
 metricItem i =
@@ -158,8 +193,10 @@ metricItem i =
     *> double
     <* ("pt" <?> "pt")
 
+
 comma :: Parser ()
 comma = (skipSpace *> char ',' *> skipSpace) <?> "a comma"
+
 
 -- width=480.311pt, height=172.12pt, depth=0pt
 metricsLine :: Parser Metrics
@@ -170,6 +207,7 @@ metricsLine = skipSpace *> do
   depth <- metricItem "depth"
   endOfLine
   return $ Metrics width height (Just depth)
+
 
 -- graphic size: 480.311pt x 172.12pt (168.81mm x 60.4932mm)
 metricsLineNoDepth :: Parser Metrics
@@ -187,17 +225,36 @@ metricsLineNoDepth = do
   skipLine
   return $ Metrics width height Nothing
 
+
 newtype MathEnv = MathEnv {_name :: T.Text} deriving (Eq,Show)
-data EqnOut  = EqnOut {filename::FilePath, metrics :: !Metrics} deriving (Eq,Show)
-data Metrics = Metrics {width,_height :: !Double, depth :: Maybe Double} deriving (Eq,Show)
-newtype DVISVGMPath = DVISVGM {getDVISVGM :: FilePath} deriving (Eq,Show)
-newtype LatexPath = LaTex {getLatex :: FilePath} deriving (Eq,Show)
+
+data EqnOut  = EqnOut
+  { filename :: FilePath
+  , metrics  :: !Metrics
+  } deriving (Eq,Show)
+
+data Metrics = Metrics
+  { width  :: !Double
+  , _height :: !Double
+  , depth  :: Maybe Double
+  } deriving (Eq,Show)
+
+newtype DVISVGMPath = DVISVGM {getDVISVGM :: FilePath}
+  deriving (Eq,Show)
+
+newtype LatexPath = LaTex {getLatex :: FilePath}
+  deriving (Eq,Show)
+
 
 findDVISVGM :: IO DVISVGMPath
 findDVISVGM =
   DVISVGM <$> (fromMaybe (throw NoDVISVGM) <$> findExecutable "dvisvgm")
+
+
 findLatex :: IO LatexPath
-findLatex = LaTex <$> (fromMaybe (throw NoLatex) <$> findExecutable "xelatex")
+findLatex =
+  LaTex <$> (fromMaybe (throw NoLatex) <$> findExecutable "xelatex")
+
 
 mkDVISVGM :: FilePath -> IO DVISVGMPath
 mkDVISVGM fp = do
@@ -205,17 +262,23 @@ mkDVISVGM fp = do
   unless e (throw NoDVISVGM)
   pure (DVISVGM fp)
 
+
 mkLatex :: FilePath -> IO LatexPath
 mkLatex fp = do
   e <- doesFileExist fp
   unless e (throw NoLatex)
   pure (LaTex fp)
 
+
 getLatexParams :: String -> MathEnvResult -> [String]
 getLatexParams fn (Right (MathEnv "tikzpicture")) =
   ["-no-pdf", "-jobname=" ++ fn, "-halt-on-error"]
-getLatexParams fn _ = ["-no-pdf", "-jobname=" ++ fn, "-halt-on-error"]
+getLatexParams fn _ =
+  ["-no-pdf", "-jobname=" ++ fn, "-halt-on-error"]
 
+
+-- Vanha SVG-muunnos.
+-- Tätä käytetään math_type=svg -tapauksessa.
 doConvert
   :: FilePath
   -> DVISVGMPath
@@ -227,46 +290,70 @@ doConvert
 doConvert curTmpDir dvisvgm latex preamble mt eqn = do
   let fn        = showDigest . sha1 . LT.encodeUtf8 . LT.pack $ eqn
       env       = parseOnly parseMathEnv (T.pack eqn)
-      latexFile = latexTemplate preamble mt eqn env
+      latexFile = latexTemplate specialCmd preamble mt eqn env
+
   _ <- timeoutException 5000000 LaTexTimeouted $ readProcessException
     LaTexFailed
     curTmpDir
     (getLatex latex)
     (getLatexParams fn env)
     latexFile
+
   eb  <- head <$> invokeDVISVGM curTmpDir dvisvgm fn mt env
   svg <- BS.readFile (curTmpDir ++ "/" ++ filename eb)
-  return . force . wrapMath mt $ createSVGImg eb (LBS.fromStrict svg) eqn
+
+  return . force . wrapMath mt $
+    createSVGImg eb (LBS.fromStrict svg) eqn
 
 
-data ConversionError = CouldNotParseDVISVGM String String
-                     | DVISVGMTimeouted
-                     | DVISVGMFailed ExitCode String String
-                     | LaTexTimeouted
-                     | LaTexFailed ExitCode String String
-                     | UnexpectedError String
-                 deriving (Eq,Show,Typeable)
+data ConversionError
+  = CouldNotParseDVISVGM String String
+  | DVISVGMTimeouted
+  | DVISVGMFailed ExitCode String String
+  | LaTexTimeouted
+  | LaTexFailed ExitCode String String
+  | UnexpectedError String
+  deriving (Eq,Show,Typeable)
+
+
 instance Exception ConversionError
 
 
-data SetupError =
-                  NoLatex
-                 | NoDVISVGM
-                 deriving (Eq,Show,Typeable)
+data SetupError
+  = NoLatex
+  | NoDVISVGM
+  deriving (Eq,Show,Typeable)
+
+
 instance Exception SetupError
+
 
 renderConversionError :: String -> ConversionError -> Inline
 renderConversionError eqn e = case e of
   CouldNotParseDVISVGM dvi err ->
     mkErr "Could not parse DVISVGM output" (err ++ "\n" ++ dvi)
-  DVISVGMTimeouted        -> mkErr "DVISVGM timeouted" ""
-  DVISVGMFailed _ err out -> mkErr "DVISVGM failed" (err ++ "\n" ++ out)
-  LaTexTimeouted          -> mkErr "Latex timeouted" ""
-  LaTexFailed _ err out   -> mkErr "Latex failed" (err ++ "\n" ++ out)
-  UnexpectedError w       -> mkErr "Something unexpected happened" w
+
+  DVISVGMTimeouted ->
+    mkErr "DVISVGM timeouted" ""
+
+  DVISVGMFailed _ err out ->
+    mkErr "DVISVGM failed" (err ++ "\n" ++ out)
+
+  LaTexTimeouted ->
+    mkErr "Latex timeouted" ""
+
+  LaTexFailed _ err out ->
+    mkErr "Latex failed" (err ++ "\n" ++ out)
+
+  UnexpectedError w ->
+    mkErr "Something unexpected happened" w
+
  where
   teqn = T.pack eqn
-  mkErr e diagnostics = createError teqn (T.pack $ e ++ "\n" ++ diagnostics)
+
+  mkErr e diagnostics =
+    createError teqn (T.pack $ e ++ "\n" ++ diagnostics)
+
 
 createError :: T.Text -> T.Text -> Inline
 createError eqn le =
@@ -277,7 +364,9 @@ createError eqn le =
     ++ "<pre>"
     ++ entity le
     ++ "</pre></details>"
-  where entity = T.unpack . UENC.text
+  where
+    entity = T.unpack . UENC.text
+
 
 timeoutException :: Exception e => Int -> e -> IO b -> IO b
 timeoutException n exc process = do
@@ -285,12 +374,6 @@ timeoutException n exc process = do
   case res of
     Nothing -> throw exc
     Just f  -> pure f
-
---doInTemporary :: (NFData a) => FilePath -> IO a -> IO a
-
---doInTemporary base op = evaluate . force =<<
-
---                            (withTempDirectory base "temp_" (\tmpDir -> evaluate . force =<< withCurrentDirectory tmpDir op))
 
 
 readProcessException
@@ -303,10 +386,13 @@ readProcessException
   -> IO (String, String)
 readProcessException toExc curTmp process args stdinContent = do
   let theProcess = (proc process args) { cwd = Just curTmp }
+
   res <- readCreateProcessWithExitCode theProcess stdinContent
+
   case res of
     (e@(ExitFailure _), a, b) -> throw (toExc e a b)
     (ExitSuccess      , a, b) -> return (a, b)
+
 
 getDVISVGMParams :: String -> MathEnvResult -> MathType -> [String]
 getDVISVGMParams fn (Right (MathEnv "tikzpicture")) _ =
@@ -318,6 +404,7 @@ getDVISVGMParams fn (Right (MathEnv "tikzpicture")) _ =
   , "--bbox=papersize"
   , fn ++ ".xdv"
   ]
+
 getDVISVGMParams fn _ mt =
   [ "--progress=9007199254740992"
   , "-p1-"
@@ -328,12 +415,19 @@ getDVISVGMParams fn _ mt =
   , fn ++ ".xdv"
   ]
 
+
 compose :: [a -> a] -> a -> a
 compose = foldr (.) id
 
+
 -- hack for fixing floats in dvisvgm output - haskell doesn't accept leading dot in fractions
 fixFloats :: T.Text -> T.Text
-fixFloats s = compose (map (\x -> T.replace (x <> "=.") (x <> "=0.")) ["width", "height", "depth"]) s
+fixFloats s =
+  compose
+    (map (\x -> T.replace (x <> "=.") (x <> "=0."))
+      ["width", "height", "depth"])
+    s
+
 
 invokeDVISVGM
   :: FilePath
@@ -349,33 +443,49 @@ invokeDVISVGM curTmp dvisvgm fn mt env = do
     (getDVISVGM dvisvgm)
     (getDVISVGMParams fn env mt)
     ""
-  case parseOnly (many1 parseBlock) (fixFloats . LT.toStrict $ LT.pack dvi) of
+
+  case parseOnly
+         (many1 parseBlock)
+         (fixFloats . LT.toStrict $ LT.pack dvi) of
     Right []       -> throw (UnexpectedError "many1 returned none")
     Right (x : xs) -> pure (x :| xs)
-    Left  err      -> throw (CouldNotParseDVISVGM dvi err)
+    Left err        -> throw (CouldNotParseDVISVGM dvi err)
+
 
 _addStylesheet :: LBS.ByteString -> LBS.ByteString
-_addStylesheet svg = LBS.append
-  (LT.encodeUtf8
-  . LT.pack
-  $ "<?xml version='1.0' encoding='UTF-8'?><?xml-stylesheet href=\"/static/svgmath.css\" type=\"text/css\"?>"
-  )
-  (LBS.dropWhile (/= 10) svg)
+_addStylesheet svg =
+  LBS.append
+    (LT.encodeUtf8
+      . LT.pack
+      $ "<?xml version='1.0' encoding='UTF-8'?><?xml-stylesheet href=\"/static/svgmath.css\" type=\"text/css\"?>"
+    )
+    (LBS.dropWhile (/= 10) svg)
+
+
+-- ============================================================================
+-- Vanha SVG-versio: <img src="data:image/svg+xml;base64,...">
+-- ============================================================================
 
 createSVGImg :: EqnOut -> LBS.ByteString -> String -> Html
 createSVGImg eb svg eqn =
   img
     ! style
-        (toValue $ "width:" <> tm width <> "; " <> "vertical-align:-" <> tm
-          ((/ 1.0) . fromMaybe 0 . depth)
+        (toValue $
+          "width:" <> tm width <> "; " <>
+          "vertical-align:-" <> tm ((/ 1.0) . fromMaybe 0 . depth)
         )
-    ! src (toValue $ "data:image/svg+xml;base64," <> encode svg)
+    ! src (toValue $ "data:image/svg+xml;base64," <> encodeSvg svg)
     ! title (toValue eqn)
  where
-  encode = LT.unpack . LT.decodeUtf8 . B64.encode -- .  ZLib.compress
+  encodeSvg =
+    LT.unpack . LT.decodeUtf8 . B64.encode
 
-  tm f = ($ "em") . showFFloat (Just 5) . toEm . f . metrics $ eb
-  toEm = estimatePtToEm ""
+  tm f =
+    ($ "em") . showFFloat (Just 5) . toEm . f . metrics $ eb
+
+  toEm =
+    estimatePtToEm ""
+
 
 wrapMath :: MathType -> Html -> Inline
 wrapMath mt svg =
@@ -386,32 +496,247 @@ wrapMath mt svg =
     ! class_ ("mathp " <> (if mt == InlineMath then "inline" else "display"))
     $ svg
 
-data Tex2SvgRuntime = T2SR {
-      readCache  :: Integer -> IO (Maybe Inline)
-    , writeCache :: Integer -> Inline -> IO ()
-    , tmp        :: FilePath
-    , latex      :: LatexPath
-    , dvisvgm    :: DVISVGMPath}
+
+-- ============================================================================
+-- Uusi CSVG-versio: inline <svg> ja currentColor
+-- ============================================================================
+
+addColorToFill :: LT.Text -> LT.Text
+addColorToFill t =
+  case LT.breakOn "fill='" t of
+    (before, rest)
+      | LT.null rest -> t
+      | otherwise ->
+          let afterStart = LT.drop 6 rest
+              (value, afterValue) = LT.breakOn "'" afterStart
+          in before
+             <> "fill='"
+             <> value
+             <> "' color='"
+             <> value
+             <> "'"
+             <> addColorToFill (LT.drop 1 afterValue)
+
+
+modifySvg :: LBS.ByteString -> LBS.ByteString
+modifySvg svg =
+  LT.encodeUtf8 $ addAttrs $ stripSvgPreamble (LT.decodeUtf8 svg)
+ where
+  stripSvgPreamble t =
+    let (_, rest) = LT.breakOn "<svg" t
+    in if LT.null rest then t else rest
+
+  -- Loput nykyisestä koodista ennallaan:
+  addAttrs :: LT.Text -> LT.Text
+  addAttrs t =
+    case LT.breakOn "<svg" t of
+      (before, rest)
+        | LT.null rest -> t
+        | otherwise ->
+            let (svgTag, after) = LT.breakOn ">" rest
+                svgTag' = removeSizeAttrs svgTag
+                result =
+                  before
+                  <> svgTag'
+                  <> LT.pack svgAttrs
+                  <> after
+            in addColorToFill result
+
+  removeSizeAttrs :: LT.Text -> LT.Text
+  removeSizeAttrs =
+    removeAttr "width"
+    . removeAttr "height"
+
+  removeAttr :: LT.Text -> LT.Text -> LT.Text
+  removeAttr name t =
+    case LT.breakOn (" " <> name <> "='") t of
+      (before, rest)
+        | LT.null rest -> t
+        | otherwise ->
+            let afterStart = LT.drop (LT.length name + 3) rest
+                (_, afterValue) = LT.breakOn "'" afterStart
+            in before <> removeAttr name (LT.drop 1 afterValue)
+
+
+createCSvg :: EqnOut -> LBS.ByteString -> String -> Html
+createCSvg eb svg _eqn =
+  preEscapedToMarkup
+    $ LT.toStrict
+    $ insertAttrs
+    $ LT.decodeUtf8 (modifySvg svg)
+ where
+  tm f =
+    ($ "em") . showFFloat (Just 5) . toEm . f . metrics $ eb
+
+  svgStyle =
+    "width:" <> tm width
+      <> ";vertical-align:-"
+      <> tm ((/ 1.0) . fromMaybe 0 . depth)
+      <> ";"
+
+  insertAttrs t =
+    case LT.breakOn "<svg" t of
+      (before, afterSvg) ->
+        case LT.breakOn ">" afterSvg of
+          (openTag, rest) ->
+            before
+              <> openTag
+              <> " style='"
+              <> LT.pack svgStyle
+              <> "'>"
+              <> LT.drop 1 rest
+
+  toEm =
+    estimatePtToEm ""
+
+
+wrapCSvg :: MathType -> String -> Html -> Inline
+wrapCSvg mt eqn svg =
+  RawInline (Format "html")
+    $ LT.toStrict
+    $ renderHtml
+    $ span
+    ! class_ ("mathp " <> (if mt == InlineMath then "inline" else "display"))
+    ! title (toValue eqn)
+    $ svg
+
+
+-- Uusi CSVG-muunnos.
+-- Varsinainen LaTeX/DVI/dvisvgm-prosessi on sama kuin vanhassa,
+-- mutta tulos paketoidaan inline-SVG:ksi.
+doConvertCSvg
+  :: FilePath
+  -> DVISVGMPath
+  -> LatexPath
+  -> String
+  -> MathType
+  -> String
+  -> IO Inline
+doConvertCSvg curTmpDir dvisvgm latex preamble mt eqn = do
+  let fn        = showDigest . sha1 . LT.encodeUtf8 . LT.pack $ eqn
+      env       = parseOnly parseMathEnv (T.pack eqn)
+      latexFile = latexTemplate "" preamble mt eqn env
+
+  _ <- timeoutException 5000000 LaTexTimeouted $ readProcessException
+    LaTexFailed
+    curTmpDir
+    (getLatex latex)
+    (getLatexParams fn env)
+    latexFile
+
+  eb  <- head <$> invokeDVISVGM curTmpDir dvisvgm fn mt env
+  svg <- BS.readFile (curTmpDir ++ "/" ++ filename eb)
+
+  return . force . wrapCSvg mt eqn $
+    createCSvg eb (LBS.fromStrict svg) eqn
+
+
+data Tex2SvgRuntime = T2SR
+  { readCache  :: Integer -> IO (Maybe Inline)
+  , writeCache :: Integer -> Inline -> IO ()
+  , tmp        :: FilePath
+  , latex      :: LatexPath
+  , dvisvgm    :: DVISVGMPath
+  }
+
 
 estimatePtToEm :: T.Text -> (Double -> Double)
-estimatePtToEm _preamble = (/ 8.3645834169792) --TODO
+estimatePtToEm _preamble =
+  (/ 8.3645834169792)
 
+
+-- ============================================================================
+-- Vanha tex2svg
+--
+-- TÄMÄN CACHE-AVAINTA EI MUUTETA.
+-- Vanha svg-cache toimii siis edelleen.
+-- ============================================================================
 
 tex2svg :: Tex2SvgRuntime -> T.Text -> Inline -> IO Inline
 tex2svg T2SR {..} preamble (Math mt math) = do
-  let cacheKey = integerDigest . sha1 . encode $ (mt, math, preamble) -- TODO: Preamble needed here
+  let cacheKey =
+        integerDigest . sha1 . encode $
+          (mt, math, preamble)
 
   cached <- readCache cacheKey
-  case cached of
-    Nothing -> withTempDirectory tmp "tex2svg." $ \curTmpDir -> do
-      svg' <- catch
-        (do
-          result <- doConvert curTmpDir dvisvgm latex (T.unpack preamble) mt (T.unpack math)
-          writeCache cacheKey result
-          return result
-          )
-        (\e -> return (renderConversionError (T.unpack math) (e :: ConversionError)))
-      return svg'
-    Just s -> pure s
 
-tex2svg _ _ il = return il
+  case cached of
+    Nothing ->
+      withTempDirectory tmp "tex2svg." $ \curTmpDir -> do
+        svg' <- catch
+          (do
+            result <-
+              doConvert
+                curTmpDir
+                dvisvgm
+                latex
+                (T.unpack preamble)
+                mt
+                (T.unpack math)
+
+            writeCache cacheKey result
+            return result
+          )
+          (\e ->
+            return
+              (renderConversionError
+                (T.unpack math)
+                (e :: ConversionError)))
+
+        return svg'
+
+    Just s ->
+      pure s
+
+tex2svg _ _ il =
+  return il
+
+
+-- ============================================================================
+-- Uusi tex2csvg
+--
+-- Cache-avain alkaa yhdellä tavulla "c", joten se ei voi törmätä vanhan
+-- tex2svg-version cache-avaimeen.
+-- ============================================================================
+
+tex2csvg :: Tex2SvgRuntime -> T.Text -> Inline -> IO Inline
+tex2csvg T2SR {..} preamble (Math mt math) = do
+  let oldKey =
+        encode (mt, math, preamble)
+
+      cacheKey =
+        integerDigest . sha1 $
+          LBS.cons 99 oldKey
+
+  cached <- readCache cacheKey
+
+  case cached of
+    Nothing ->
+      withTempDirectory tmp "tex2csvg." $ \curTmpDir -> do
+        svg' <- catch
+          (do
+            result <-
+              doConvertCSvg
+                curTmpDir
+                dvisvgm
+                latex
+                (T.unpack preamble)
+                mt
+                (T.unpack math)
+
+            writeCache cacheKey result
+            return result
+          )
+          (\e ->
+            return
+              (renderConversionError
+                (T.unpack math)
+                (e :: ConversionError)))
+
+        return svg'
+
+    Just s ->
+      pure s
+
+tex2csvg _ _ il =
+  return il

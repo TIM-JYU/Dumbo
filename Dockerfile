@@ -4,13 +4,24 @@ FROM fpco/stack-build:lts-18.13 AS build
 LABEL author="Ville Tirronen"
 LABEL maintainer="help@tim.education"
 
+# Install a newer Stack version to avoid Hackage metadata signature
+# verification failures with the version included in the base image.
+RUN wget -qO- https://get.haskellstack.org/ | sh -s - -f
+
+# Print the Stack version in the build log for troubleshooting.
+RUN stack --version
+
 ENV APT_INSTALL="DEBIAN_FRONTEND=noninteractive apt-get -qq update && DEBIAN_FRONTEND=noninteractive apt-get -q install --no-install-recommends -y" \
     APT_CLEANUP="rm -r /var/lib/apt/lists/*"
-
+	
 ENV LANG=C.UTF-8 \
     LC_ALL=C.UTF-8
 
-RUN stack update
+# Not needed with the current setup: stack.yaml pins the resolver, 
+# and stack build resolves and downloads the required dependencies. 
+# The build succeeded without this command, so avoid an unnecessary 
+# package-index update.
+# RUN stack update
 
 WORKDIR /build
 COPY LICENSE ./

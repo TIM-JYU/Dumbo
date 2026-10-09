@@ -36,12 +36,18 @@ import Options.Generic
 import Text.LaTeX.Base.Syntax
 import Text.LaTeX.Base.Parser
 import qualified Data.Set as Set
+import Numeric (showHex)
 
 defaultReader :: PDC.Reader PDC.PandocIO
 defaultReader = PDC.TextReader PDC.readMarkdown
 
 tex2SvgPass :: DumboRTC -> T.Text -> (PDC.Block -> IO PDC.Block)
 tex2SvgPass drtc preamble = walkM (tex2svg (tex2svgRtc drtc) preamble . rawInlinePass) . rawBlockPass
+
+tex2CSvgPass :: DumboRTC -> T.Text -> (PDC.Block -> IO PDC.Block)
+tex2CSvgPass drtc preamble =
+  walkM (tex2csvg (tex2svgRtc drtc) preamble . rawInlinePass) .
+  rawBlockPass
 
 latexMathPass :: (T.Text -> a) -> T.Text -> a -> a
 latexMathPass d s b =
@@ -141,19 +147,37 @@ initialize :: DumboArgs Unwrapped -> IO DumboRTC
 initialize dargs = do
   latexP   <- maybe findLatex mkLatex (Main.latex dargs)
   dvisvgmP <- maybe findDVISVGM mkDVISVGM (Main.dvisvgm dargs)
-  let cacheFN :: Integer -> String
-      cacheFN i = cacheDir dargs ++ "/" ++ triep (show i)
+  let cacheFN :: Integer -> FilePath
+      cacheFN i =
+        let hex = showHex i ""
+            padded = replicate (40 - length hex) '0' ++ hex
+        in cacheDir dargs ++ "/" ++ take 2 padded ++ "/" ++ drop 2 padded ++ ".cache"
+
+      oldCacheFN :: Integer -> FilePath
+      oldCacheFN i = cacheDir dargs ++ "/" ++ triep (show i)
+
       triep :: String -> FilePath
       triep [a,b,c] = a:b:c:".cache"
       triep (a:b:c:xs) = a:b:c:'/':triep xs
       triep xs = xs
+
+      readCacheFile :: FilePath -> IO (Maybe PDC.Inline)
+      readCacheFile path = do
+        e <- doesFileExist path
+        if e then decode <$> LBS.readFile path else pure Nothing
+
       cacheRead :: Integer -> IO (Maybe PDC.Inline)
       cacheRead i = do
-        e <- doesFileExist (cacheFN i)
-        if e then decode <$> LBS.readFile (cacheFN i) else pure Nothing
+        newCache <- readCacheFile (cacheFN i)
+        case newCache of
+          Just result -> pure (Just result)
+          Nothing -> readCacheFile (oldCacheFN i)
+
       cacheWrite :: Integer -> PDC.Inline -> IO ()
-      cacheWrite i inline = createDirectoryIfMissing True (takeDirectory (cacheFN i)) >>
-                            LBS.writeFile (cacheFN i) (encode inline)
+      cacheWrite i inline = do
+        let path = cacheFN i
+        createDirectoryIfMissing True (takeDirectory path)
+        LBS.writeFile path (encode inline)
   return $ DRTC (T2SR
                 cacheRead
                 cacheWrite
@@ -221,17 +245,31 @@ getInputFormat timInput ce
 
 convertElement rtc globalMath globalPreamble ce
   = case ce of
-        CEBare txt
-          | (defMathOption ?: globalMath) == SVG
-              -> (tex2SvgPass rtc (defPreamble ?: globalPreamble) , txt)
-          | otherwise
-              -> (pure ,  txt)
+      CEBare txt ->
+        case defMathOption ?: globalMath of
+          SVG ->
+            (tex2SvgPass rtc (defPreamble ?: globalPreamble), txt)
 
-        CEWrapped obj
-          | (defMathOption ?: globalMath ?: mathOption obj) == SVG
-              -> (tex2SvgPass rtc (defPreamble ?: globalPreamble ?: mathPreamble obj) , content obj)
-          | otherwise
-              -> (pure , content obj)
+          CSVG ->
+            (tex2CSvgPass rtc (defPreamble ?: globalPreamble), txt)
+
+          MathJAX ->
+            (pure, txt)
+
+      CEWrapped obj ->
+        case defMathOption ?: globalMath ?: mathOption obj of
+          SVG ->
+            (tex2SvgPass rtc
+              (defPreamble ?: globalPreamble ?: mathPreamble obj),
+             content obj)
+
+          CSVG ->
+            (tex2CSvgPass rtc
+              (defPreamble ?: globalPreamble ?: mathPreamble obj),
+             content obj)
+
+          MathJAX ->
+            (pure, content obj)
 
 conversion :: (MonadIO m0, ToJSON b0,FromJSON a0,MonadSnap m0) =>
                 (TIMIFace (V.Vector a0) -> a0 -> IO b0) -> m0 ()
@@ -241,7 +279,7 @@ conversion f = do
     Left  err      -> writeLBS . encode $ mkErr "Decoding input" err
     Right timInput -> liftIO (V.mapM (f timInput) (content timInput)) >>= writeLBS . encode
 
-data MathOption = SVG | MathJAX deriving (Eq,Show)
+data MathOption = SVG | CSVG | MathJAX deriving (Eq,Show)
 
 defMathOption :: MathOption
 defMathOption = MathJAX
@@ -257,10 +295,11 @@ defSmartPunct = False
 
 instance FromJSON MathOption where
     parseJSON (String txt) = case txt of
-                              "svg"     -> pure SVG
-                              "mathjax" -> pure MathJAX
-                              _         -> fail ("Unexpected math option"++show txt)
-    parseJSON invalid    = typeMismatch "MathOption" invalid
+        "svg"     -> pure SVG
+        "csvg"    -> pure CSVG
+        "mathjax" -> pure MathJAX
+        _         -> fail ("Unexpected math option" ++ show txt)
+    parseJSON invalid = typeMismatch "MathOption" invalid
 
 data ConversionElement el =
                          CEBare el
