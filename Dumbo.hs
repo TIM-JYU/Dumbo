@@ -1,3 +1,33 @@
+-- ============================================================================
+-- Dumbo.hs
+--
+-- Purpose:
+-- Provide the TIM Markdown conversion service.
+--
+-- Dumbo uses Pandoc to read Markdown and convert it to HTML or LaTeX.
+-- It also supports conversion of JSON input containing Markdown fields.
+--
+-- Mathematical expressions can be rendered using:
+--   - SVG:    SVG graphics embedded as Base64 data URLs.
+--   - CSVG:   SVG graphics embedded directly in HTML.
+--   - MathJAX: expressions left for MathJax to render in the browser.
+--
+-- The service exposes HTTP endpoints for Markdown and LaTeX conversion,
+-- including endpoints for processing JSON fields with conversion keys.
+--
+-- Cache:
+-- Generated mathematical output is cached on disk to avoid repeating
+-- expensive LaTeX and SVG conversions.
+--
+-- The cache root directory is supplied through the cacheDir argument.
+-- Cache keys are generated in Tex2Svg.hs. The current cache layout uses
+-- two hexadecimal characters as the first directory name and the remaining
+-- characters as the cache filename.
+--
+-- The service can also read entries from the legacy cache layout.
+-- New entries are written using the current layout.
+-- ============================================================================
+
 {-#OPTIONS_GHC -Wall #-}
 {-#LANGUAGE OverloadedStrings, ScopedTypeVariables #-}
 {-#LANGUAGE DataKinds #-}
@@ -147,6 +177,16 @@ initialize :: DumboArgs Unwrapped -> IO DumboRTC
 initialize dargs = do
   latexP   <- maybe findLatex mkLatex (Main.latex dargs)
   dvisvgmP <- maybe findDVISVGM mkDVISVGM (Main.dvisvgm dargs)
+  -- Cache path handling.
+  --
+  -- Current layout:
+  --   <cacheDir>/<first 2 hex characters>/<remaining hex characters>.cache
+  --
+  -- Legacy layout:
+  --   <cacheDir>/<key grouped into 3-character directory names>.cache
+  --
+  -- Reads try the current layout first and then the legacy layout.
+  -- Writes use only the current layout and create missing directories.  
   let cacheFN :: Integer -> FilePath
       cacheFN i =
         let hex = showHex i ""
