@@ -95,7 +95,8 @@ specialCmd
 
 svgAttrs :: String
 svgAttrs =
-  " fill=\"currentColor\" stroke=\"currentColor\" stroke-width=\"0.10pt\""
+  " stroke-width=\"0.10pt\""
+  --  " fill=\"currentColor\" stroke=\"currentColor\" stroke-width=\"0.10pt\""
 
 
 type MathEnvResult = Either String MathEnv
@@ -115,6 +116,9 @@ latexTemplate special preamble _ eqn (Right (MathEnv "tikzpicture")) = unlines
   , "\\usepackage{amsfonts}"
   , "\\usepackage{amssymb}"
   , "\\usepackage{tikz}"
+  , "\\providecolor{inheritFillCSS}{RGB}{255,255,254}"  -- see replaceTikzColors 
+  , "\\providecolor{inheritDrawCSS}{RGB}{1,2,2}"
+  , "\\providecolor{inheritTextCSS}{RGB}{1,2,3}"
   , preamble
   , "\\begin{document}"
   , eqn
@@ -554,14 +558,30 @@ addColorToFill t =
              <> addColorToFill (LT.drop 1 afterValue)
 
 
+replaceFirst :: LT.Text -> LT.Text -> LT.Text -> LT.Text
+replaceFirst old new txt =
+  let (before, rest) = LT.breakOn old txt
+  in if LT.null rest
+       then txt
+       else before <> new <> LT.drop (LT.length old) rest
+
 modifySvg :: LBS.ByteString -> LBS.ByteString
 modifySvg svg =
   LT.encodeUtf8
     $ addColorToFill
+    $ replaceTikzColors
     $ addAttrs
     $ expandUses
     $ stripSvgPreamble (LT.decodeUtf8 svg)
  where
+  replaceTikzColors :: LT.Text -> LT.Text
+  replaceTikzColors =
+      LT.replace "stroke='#010202'" "stroke='inherit'"   --  , "\\providecolor{inheritDrawCSS}{RGB}{1,2,2}"  
+    . LT.replace "fill='#010203'" "fill='currentColor'"  --  , "\\providecolor{inheritTextCSS}{RGB}{1,2,3}"
+    . LT.replace "fill='#fffffe'" "fill='inherit'"       --  , "\\providecolor{inheritFillCSS}{RGB}{255,255,254}"  
+    . LT.replace "color='#010202" "color='inherit'"      --  , "\\providecolor{inheritDrawCSS}{RGB}{1,2,2}"  
+    . replaceFirst "<g fill='#000' stroke='#000'>" "<g>"
+	
   stripSvgPreamble t =
     let (_, rest) = LT.breakOn "<svg" t
     in if LT.null rest then t else rest
